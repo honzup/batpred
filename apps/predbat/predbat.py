@@ -328,6 +328,9 @@ class PredBat(hass.Hass, Octopus, Energidataservice, Stromligning, Fetch, Plan, 
         self.plan_interval_minutes = self.args.get("plan_interval_minutes", 30)
         self.db_manager = None
         self.plan_debug = False
+        self.plan_rate_colour_bands = None
+        self.plan_export_colour_bands = None
+        self.rate_colour_bands_warned = set()
         self.arg_errors = {}
         self.arg_warnings = {}
         self.validate_config_retries_remaining = 0

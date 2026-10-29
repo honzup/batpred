@@ -4341,6 +4341,8 @@ class Fetch:
 
         self.debug_enable = self.get_arg("debug_enable")
         self.plan_debug = self.get_arg("plan_debug")
+        self.plan_rate_colour_bands = self.get_rate_colour_bands("plan_rate_colour_bands")
+        self.plan_export_colour_bands = self.get_rate_colour_bands("plan_export_colour_bands")
         self.previous_status = self.get_state_wrapper(self.prefix + ".status")
         forecast_hours = max(self.get_arg("forecast_hours", 48), 24)
 

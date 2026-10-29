@@ -736,6 +736,65 @@ class Output:
                 symbol = "?"
         return symbol
 
+    def get_rate_colour_bands(self, name):
+        """
+        Read an optional [low, high] colour band setting (plan_rate_colour_bands / plan_export_colour_bands)
+        from apps.yaml, in the same minor unit as the rates (p, öre, cents). Display only, never used by the optimiser.
+        Returns (low, high) or None when unset or invalid; an invalid value is logged once.
+        """
+        value = self.get_arg(name, None, indirect=False)
+        if value is None:
+            return None
+        if isinstance(value, list) and len(value) == 2 and all(isinstance(item, (int, float)) and not isinstance(item, bool) for item in value) and value[0] <= value[1]:
+            return (float(value[0]), float(value[1]))
+        if name not in self.rate_colour_bands_warned:
+            self.rate_colour_bands_warned.add(name)
+            self.log("Warn: {} should be a list of two numbers [low, high] with low <= high, got {} - using the default threshold-based colours".format(name, value))
+        return None
+
+    def plan_import_rate_color(self, rate, import_cost_threshold):
+        """
+        Colour an import rate for the plan: blue for negative/zero, then green, yellow and red.
+        Uses the fixed plan_rate_colour_bands when set, otherwise bands relative to the import threshold.
+        """
+        if rate <= 0:
+            return "#74C1FF"
+        if self.plan_rate_colour_bands:
+            low, high = self.plan_rate_colour_bands
+            if rate <= low:
+                return "#3AEE85"
+            elif rate > high:
+                return "#F18261"
+            return "#FFFFAA"
+        if rate <= import_cost_threshold:
+            return "#3AEE85"
+        elif rate > (import_cost_threshold * 1.5):
+            return "#F18261"
+        return "#FFFFAA"
+
+    def plan_export_rate_color(self, rate, export_cost_threshold):
+        """
+        Colour an export rate for the plan: red, yellow, light blue, then grey for the least valuable.
+        Uses the fixed plan_export_colour_bands when set (red >= high, yellow >= low, light blue > 0, grey <= 0),
+        otherwise bands relative to the export threshold.
+        """
+        if self.plan_export_colour_bands:
+            low, high = self.plan_export_colour_bands
+            if rate >= high:
+                return "#F18261"
+            elif rate >= low:
+                return "#FFFFAA"
+            elif rate > 0:
+                return "#48deff"
+            return "#dcdcdc"
+        if rate >= (1.5 * export_cost_threshold):
+            return "#F18261"
+        elif rate >= export_cost_threshold:
+            return "#FFFFAA"
+        elif rate > (0.5 * export_cost_threshold):
+            return "#48deff"
+        return "#dcdcdc"
+
     def get_html_plan_header(self, plan_debug):
         """
         Returns the header row for the HTML plan.
@@ -1258,16 +1317,6 @@ class Output:
         if self.rate_best_cost_threshold_export:
             export_cost_threshold = self.rate_best_cost_threshold_export
 
-        def import_rate_color(rate):
-            """Colour an import rate the same way as the plan's own Import p column (blue/green/yellow/red)."""
-            if rate <= 0:
-                return "#74C1FF"
-            elif rate <= import_cost_threshold:
-                return "#3AEE85"
-            elif rate > (import_cost_threshold * 1.5):
-                return "#F18261"
-            return "#FFFFAA"
-
         raw_plan["import_cost_threshold"] = import_cost_threshold
         raw_plan["export_cost_threshold"] = export_cost_threshold
         raw_plan["reason_templates"] = REASON_TEMPLATES
@@ -1514,16 +1563,8 @@ class Output:
             if plan_debug and load_forecast10 > 0.0:
                 load_forecast += " (%s)" % (str(load_forecast10))
 
-            rate_color_import = import_rate_color(rate_value_import)  # blue for negative, then green, yellow and red
-
-            if rate_value_export >= (1.5 * export_cost_threshold):
-                rate_color_export = "#F18261"
-            elif rate_value_export >= export_cost_threshold:
-                rate_color_export = "#FFFFAA"
-            elif rate_value_export > (0.5 * export_cost_threshold):
-                rate_color_export = "#48deff"
-            else:
-                rate_color_export = "#dcdcdc"
+            rate_color_import = self.plan_import_rate_color(rate_value_import, import_cost_threshold)  # blue for negative, then green, yellow and red
+            rate_color_export = self.plan_export_rate_color(rate_value_export, export_cost_threshold)
 
             had_state = False
 
@@ -1778,7 +1819,7 @@ class Output:
             # Import p cell to show both when that happens.
             rate_split = car_rate is not None and abs(car_rate - rate_value_import) > 0.01
             if rate_split:
-                car_rate_color = import_rate_color(car_rate)
+                car_rate_color = self.plan_import_rate_color(car_rate, import_cost_threshold)
 
             # iBoost
             iboost_amount_str = "&#9866;"

@@ -596,6 +596,37 @@ The default is 0.
   plan_random_delay: 30
 ```
 
+### plan_rate_colour_bands
+
+By default the Import and Export rates in the [Predbat plan](predbat-plan-card.md) are coloured relative to the current import and export rate thresholds,
+so the colours show which slots Predbat considers worth charging or exporting in. On a tariff where the whole price level moves a lot from day to day
+(e.g. Nord Pool spot prices) this means the same price can be shown green one day and red the next.
+
+**plan_rate_colour_bands** is an optional list of two values `[low, high]`, in the same unit as your rates (pence, öre, cents),
+that colours the import rates with fixed bands instead:
+
+- Blue - zero or negative
+- Green - up to and including `low`
+- Yellow - above `low`, up to and including `high`
+- Red - above `high`
+
+**plan_export_colour_bands** is the same for the export rates (if not set the export rates keep the threshold based colours):
+
+- Red - `high` or above
+- Yellow - `low` or above
+- Light blue - above zero
+- Grey - zero or negative
+
+These settings only change the colours shown in the plan (the HTML plan, the web interface and the plan JSON), they do not change the thresholds
+used by the optimiser. `low` must not be greater than `high`; if the value is not a list of two numbers a warning is logged and the default colours are used.
+
+For example, for Nord Pool SE4 prices in öre:
+
+```yaml
+  plan_rate_colour_bands: [200, 400]
+  plan_export_colour_bands: [50, 150]
+```
+
 ## Inverter information
 
 The template `apps.yaml` for each inverter type comes pre-configured with regular expressions that should auto-discover the Home Assistant entity names for that inverter type.
