@@ -40,6 +40,7 @@ from const import (
     FULL_EXPORT_POWER,
 )
 import copy
+import pytz
 import hashlib
 import json
 import time as time_module
@@ -466,21 +467,36 @@ def load_apps_yaml(apps_file=None, log=None, secrets_file=None):
     log = log or (lambda message, **kwargs: print(message))
     secrets = load_secrets(log=log, secrets_file=secrets_file)
 
+    apps_file = apps_file or os.getenv("PREDBAT_APPS_FILE", "apps.yaml")
+    log(f"Loading {apps_file}", quiet=False)
+    with open(apps_file, "r") as stream:
+        config = yaml.load(stream, Loader=secret_yaml_loader(secrets, log))  # nosec B506 - a SafeLoader subclass
+    return config["pred_bat"], secrets
+
+
+def secret_yaml_loader(secrets, log):
+    """
+    Return a yaml.SafeLoader subclass that resolves !secret against the given secrets dict
+
+    A new class per call, so the !secret constructor is never registered on the process-wide
+    yaml.SafeLoader that every other yaml.safe_load() uses. A missing secret logs a warning and
+    resolves to None. Use as yaml.load(stream, Loader=secret_yaml_loader(secrets, log)).
+    """
+    import yaml
+
     def secret_constructor(loader, node):
-        """YAML constructor for the !secret tag, resolving against the secrets just loaded."""
+        """YAML constructor for the !secret tag, resolving against the given secrets."""
         secret_key = loader.construct_scalar(node)
         if secret_key in secrets:
             return secrets[secret_key]
         log(f"Warn: Secret '{secret_key}' not found in secrets.yaml")
         return None
 
-    yaml.add_constructor("!secret", secret_constructor, Loader=yaml.SafeLoader)
+    class SecretYamlLoader(yaml.SafeLoader):
+        pass
 
-    apps_file = apps_file or os.getenv("PREDBAT_APPS_FILE", "apps.yaml")
-    log(f"Loading {apps_file}", quiet=False)
-    with open(apps_file, "r") as stream:
-        config = yaml.safe_load(stream)
-    return config["pred_bat"], secrets
+    SecretYamlLoader.add_constructor("!secret", secret_constructor)
+    return SecretYamlLoader
 
 
 def mask_secret_args(args):
@@ -2006,6 +2022,54 @@ def window2minutes(start, end, minutes_now):
     return compute_window_minutes(start, end, minutes_now)
 
 
+def start_of_local_day(day, local_tz):
+    """
+    The first instant of local date day in local_tz, as an aware datetime
+
+    Usually 00:00. Where the clocks go back across midnight, so 00:00 happens twice, it is the first 00:00; where they go
+    forward at midnight, so 00:00 never happens, it is the instant the day really starts (pytz's standard-time reading of
+    00:00 is that instant). zoneinfo's default fold=0 gives the same answers.
+    """
+    naive = datetime(day.year, day.month, day.day)
+    if not hasattr(local_tz, "localize"):
+        return naive.replace(tzinfo=local_tz)
+    try:
+        return local_tz.localize(naive, is_dst=None)
+    except pytz.exceptions.AmbiguousTimeError:
+        return local_tz.localize(naive, is_dst=True)
+    except pytz.exceptions.NonExistentTimeError:
+        return local_tz.localize(naive, is_dst=False)
+
+
+def clock_change_minutes(now, local_tz):
+    """
+    How far the clocks have moved since the start of today in local_tz: 60 after a spring change, -60 after an autumn one,
+    otherwise 0
+
+    Predbat's midnight_utc is now with the clock set to 00:00, so it carries now's UTC offset; on a clock-change day that
+    instant is this many minutes away from the real start of the day, and minutes_now (minutes since midnight_utc) is this
+    many minutes more than the real time elapsed since the day began. History from minute_data(backwards=True) is keyed by
+    real minutes back from now, so "since local midnight" reads of it use minutes_now - clock_change_minutes(...) (GH#5760).
+    """
+    now_local = now.astimezone(local_tz)
+    day_start = start_of_local_day(now_local.date(), local_tz)
+    return int((now_local.utcoffset() - day_start.utcoffset()).total_seconds() // 60)
+
+
+def local_day_end_minute(now, local_tz):
+    """
+    Where the end of today in local_tz falls, in minutes from Predbat's midnight_utc (now with the clock set to 00:00)
+
+    1440 on most days. On a clock-change day it is the real length of the day measured from midnight_utc: before an
+    autumn change (midnight_utc still on summer time) the day has an extra hour to run, so 1500; before a spring change,
+    1380; once the change has happened midnight_utc moves with it and it is 1440 again (GH#5760).
+    """
+    now_local = now.astimezone(local_tz)
+    midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = start_of_local_day(now_local.date() + timedelta(days=1), local_tz)
+    return int((day_end - midnight).total_seconds() // 60)
+
+
 def minutes_since_midnight(now, midnight):
     """
     Compute minutes from midnight to now, floored to a PREDICT_STEP boundary
@@ -2733,6 +2797,10 @@ HTML_DOCUMENT_PREFIXES = ("<!doctype", "<html")
 # still picked up within the hour.
 TOKEN_MINT_BACKOFF_BASE_SECONDS = 300
 TOKEN_MINT_BACKOFF_MAX_SECONDS = 3600
+# A mint refused with KT-CT-1199 ("Too many requests") is a per-key limit on obtainKrakenToken,
+# and an hourly retry has been seen to keep it tripped for days (4 Nov 2026 onwards). Keep
+# doubling past the hour for that refusal, up to this cap, so the key gets a real rest.
+TOKEN_MINT_RATE_LIMIT_BACKOFF_MAX_SECONDS = 4 * 3600
 # After a rate limit (KT-CT-1199, HTTP 429 or an edge/WAF block) the Kraken-based components pause
 # their GraphQL queries rather than sending the rest of the poll into the same limit. The pause
 # doubles per consecutive rate limit, capped so a limit that lifts is picked up within the half
@@ -2781,6 +2849,7 @@ class Backoff:
         count: Consecutive refusals so far, 0 when not backing off.
         until: Aware UTC time the backoff ends, or None.
         reason: How the last request was refused, for the log.
+        started_at: Aware UTC time of the first refusal in this run, or None.
     """
 
     def __init__(self, base_seconds, max_seconds):
@@ -2791,22 +2860,27 @@ class Backoff:
         self.until = None
         self.logged_at = None
         self.reason = None
+        self.started_at = None
 
-    def start(self, reason, retry_after=None):
+    def start(self, reason, retry_after=None, max_seconds=None):
         """Record another refusal and start (or extend) the backoff.
 
         Args:
             reason: How the request was refused, e.g. "rate limited" or "edge/WAF blocked".
             retry_after: Seconds the server asked us to wait, or None.
+            max_seconds: A cap for this refusal in place of the schedule's own, or None.
 
         Returns:
             int: The delay in seconds.
         """
+        cap = max_seconds if max_seconds is not None else self.max_seconds
         self.count += 1
-        delay = exponential_backoff_seconds(self.count, self.base_seconds, self.max_seconds)
+        delay = exponential_backoff_seconds(self.count, self.base_seconds, cap)
         if retry_after:
-            delay = min(max(delay, retry_after), self.max_seconds)
+            delay = min(max(delay, retry_after), cap)
         now = datetime.now(timezone.utc)
+        if self.started_at is None:
+            self.started_at = now
         self.until = now + timedelta(seconds=delay)
         self.logged_at = now
         self.reason = reason
@@ -2835,6 +2909,7 @@ class Backoff:
         self.until = None
         self.logged_at = None
         self.reason = None
+        self.started_at = None
         return count
 
 
@@ -3249,3 +3324,43 @@ def allocate_export_rates(needs, max_rates, p_fleet):
             remaining = 0.0
 
     return alloc
+
+
+# What the Octopus Energy integration's device_type attribute names a charger and a car as (BottlecapDave #1917)
+INTELLIGENT_DEVICE_TYPE_CHARGER = "ELECTRIC_VEHICLE_CHARGERS"
+INTELLIGENT_DEVICE_TYPE_CAR = "ELECTRIC_VEHICLES"
+
+
+def intelligent_device_is_charger(dispatch_attribute, target_attribute=None):
+    """Is a car's Octopus Intelligent device its charger (True), the car itself (False), or can that not be told (None)?
+
+    dispatch_attribute(name) reads an attribute of the car's dispatch sensor, target_attribute(name) one of its
+    Intelligent charge target entity, when there is one. Checked in order:
+
+    - is_charger on the dispatch sensor, published by Predbat's own Octopus and Kraken components.
+    - device_type, which the Octopus Energy integration puts on the charge target entity (and is read from the
+      dispatch sensor too).
+    - Failing both, which size the integration's dispatch sensor fills in: only the charge point's power for a
+      charger, only the battery size for a car.
+    """
+    is_charger = dispatch_attribute("is_charger")
+    if isinstance(is_charger, (bool, int, float)):
+        return bool(is_charger)
+    if isinstance(is_charger, str) and is_charger.strip().lower() not in ("", "unknown", "unavailable", "none"):
+        # The strings get_arg() and the charger control read as true
+        return is_charger.strip().lower() in ("on", "true", "yes", "enabled", "enable", "connected")
+    for read in (target_attribute, dispatch_attribute):
+        if read is None:
+            continue
+        device_type = read("device_type")
+        if device_type == INTELLIGENT_DEVICE_TYPE_CHARGER:
+            return True
+        if device_type == INTELLIGENT_DEVICE_TYPE_CAR:
+            return False
+    size = dispatch_attribute("vehicle_battery_size_in_kwh")
+    rate = dispatch_attribute("charge_point_power_in_kw")
+    if rate is not None and size is None:
+        return True
+    if size is not None and rate is None:
+        return False
+    return None

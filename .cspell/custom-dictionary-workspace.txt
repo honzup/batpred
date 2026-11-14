@@ -38,6 +38,7 @@ armhf
 armv
 ASHP
 asn
+asname
 astimezone
 asyncio
 atfork
@@ -49,6 +50,7 @@ automations
 autopep
 autoupdate
 ax1
+axisbelow
 axvline
 axvspan
 Backfeed
@@ -118,6 +120,7 @@ coro
 corruptleg
 corruptplans
 cprofile
+CREAT
 creds
 crosscharge
 ctrdis
@@ -187,6 +190,8 @@ ecosmart
 Eddi
 eddis
 edfenergy
+edfgb
+edgecolor
 efgh
 elif
 elinter
@@ -216,6 +221,7 @@ enphaseenergy
 Enpower
 entityfilter
 entrez
+eonnext
 epod
 epvtoday
 errno
@@ -236,6 +242,7 @@ exog
 expmsg
 exportlimit
 exportvalue
+facecolor
 fdpwr
 fdsoc
 feedin
@@ -256,6 +263,7 @@ formmethod
 foxcloud
 foxess
 foxesscloud
+frameon
 freephase
 fromisoformat
 fronius
@@ -269,9 +277,12 @@ generationmix
 generationpower
 geserial
 geseriale
+getaddrinfo
 getaffinity
 getall
 getattr
+getframe
+getmembers
 getrusage
 Ginlong
 githubusercontent
@@ -288,6 +299,7 @@ gridcharge
 gridcode
 gridconsumption
 gridconsumptionpower
+gridspec
 Groq
 growatt
 growattsph
@@ -389,6 +401,7 @@ lmt
 loadml
 loadmlpower
 loadspower
+localdomain
 localfolder
 locationless
 lockstep
@@ -422,6 +435,7 @@ metricmid
 microinverters
 middlebox
 middleboxes
+middot
 milli
 minb
 minmax
@@ -445,6 +459,7 @@ monokai
 Mosquitto
 mousedown
 mpan
+mpans
 mppt
 mprn
 mpxn
@@ -460,6 +475,8 @@ nanstd
 nattribute
 nbytes
 ncalls
+ncol
+nearbyint
 nearr
 nemotron
 NESO
@@ -470,6 +487,7 @@ nocharge
 NODETAIL
 nodischarge
 nohup
+NONAME
 noopener
 nord
 nordpool
@@ -484,6 +502,7 @@ OCPP
 octo
 octoplus
 octopoints
+oegb
 OFFPEAK
 Ofgem
 Ohme
@@ -583,6 +602,7 @@ reactivepower
 readback
 readbacks
 reasoncodes
+rebooked
 recp
 redownload
 Referer
@@ -632,6 +652,7 @@ setpoints
 setstate
 SFMB
 sg05lp1
+sharex
 SIGALRM
 sigcloud
 sigen
@@ -688,6 +709,7 @@ substep
 sunspec
 sunsynk
 supabase
+suptitle
 suspendedev
 suspendedevse
 synkctl
@@ -791,9 +813,11 @@ WIFEXITED
 WNOHANG
 workmode
 workstream
+workstreams
 worktree
 writeonly
 wrongsha
+WRONLY
 wwxxabcdefyyzz
 x1
 xaxis
@@ -809,7 +833,9 @@ yaxis
 yaxistooltip
 yday
 ylabel
+ylim
 YOURSERIAL
+yticks
 yuanzhi
 zappi
 zappis
